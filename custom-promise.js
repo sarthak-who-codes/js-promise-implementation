@@ -1,58 +1,120 @@
+const PENDING = 'pending';
+const FULFILLED = 'fulfilled';
+const REJECTED = 'rejected';
+
 class CustomPromise {
     constructor(executor) {
-        this.promiseChain = [];
-        this.handleError = () => {};
+        this.state = PENDING;
+        this.onFulfillmentCallback = [];
+        this.onRejectCallback = [];
+        this.value = undefined;
+        this.reason = undefined;
+        
+        const resolve = (value) => {
+            //console.log("In resolve");
+            if(this.state === PENDING) {
+                this.state = FULFILLED;
+                this.value = value;
+                this.onFulfillmentCallback.forEach(callbackFunc => callbackFunc(this.value))
+            }
+        }
 
-        this.onResolve = this.onResolve.bind(this);
-        this.onReject = this.onReject.bind(this);
+        const reject = (reason) => {
+            //console.log("In reject");
+            if(this.state === PENDING) {
+                this.state = REJECTED;
+                this.reason = reason;
+                this.onRejectCallback.forEach(callback => callback(this.reason));
+            }
+        }
 
-        executor(this.onResolve, this.onReject);
-    };
-
-    then(handleSuccess) {
-        this.promiseChain.push(handleSuccess);
-
-        return this;
-    }
-
-    catch(handleError) {
-        this.handleError = handleError;
-
-        return this;
-    }
-
-    onResolve(value) {
-        let storedValue = value;
-
+        //console.log("Staring executing context");
         try {
-            this.promiseChain.forEach(nextFunc => {
-                storedValue = nextFunc(storedValue);
-            })
+            executor(resolve, reject);
         } catch (error) {
-            this.onReject(error);
+            reject(error)
         }
     }
 
-    onReject(error) {
-        this.handleError(error);
+    then(onFulfill, onReject) {
+        return new CustomPromise((resolve, reject) => {
+            
+            const handleFulfill = () => {
+                queueMicrotask(() => {
+                    if(!onFulfill) {
+                        return resolve(this.value);
+                    }
+
+                    try {
+                        const result = onFulfill(this.value)
+
+                        if(result instanceof CustomPromise) {
+                            result.then(resolve, reject);
+                        }
+                        else {
+                            resolve(result);
+                        }
+                    } catch (error) {
+                        reject(error)
+                    }
+                })
+            }
+
+            const handleReject = () => {
+                queueMicrotask(() => {
+                    if(!onReject) {
+                        return reject(this.reason);
+                    }
+
+                    try {
+                        const result = onReject(this.reason);
+                        if(result instanceof CustomPromise) {
+                            result.then(resolve, reject)
+                        }
+                        else {
+                            resolve(result);
+                        }
+                    } catch (error) {
+                        reject(error)
+                    }
+                })
+            }
+
+            if(this.state === FULFILLED) {
+                handleFulfill();
+            }
+            else if(this.state === REJECTED) {
+                handleReject();
+            }
+            else {
+                this.onFulfillmentCallback.push(handleFulfill);
+                this.onRejectCallback.push(handleReject);
+            }
+        })
     }
+
+    catch(onReject) {
+        return this.then(undefined, onReject);
+    }
+
 }
 
-const makeApiCall = () => {
+const myPromise = () => {
     return new CustomPromise((resolve, reject) => {
         setTimeout(() => {
-            if(Math.random() > 0.5)
-                resolve(100);
-            else
-                reject({
-                    error: "Something bad happend",
-                    status: 401,
-                })
+            console.log("From setTimeout");
+            resolve("Promise resolved");
+
         }, 2000)
     })
 }
 
-makeApiCall()
-    .then(() => { console.log("In 1st then") })
-    .then(() => console.log("In 2nd then"))
-    .catch((error) => { console.log(`Error catched: ${JSON.stringify(error)}`) });
+myPromise().then(() => {
+    console.log("From then");
+    throw new Error("Intentinal error")
+}).catch((error) => {
+    console.log("In catch");
+    // return "Returing from catch"
+}).then((value) => {
+    console.log(`From second then, value: ${value}`)
+})
